@@ -4,50 +4,74 @@ on:
   workflow_dispatch:
     inputs:
       url:
+        description: "URL website (contoh: http://152.42.253.8:2187)"
         required: true
+        type: string
       app_name:
+        description: "Nama aplikasi (contoh: Lixx)"
         required: true
+        type: string
       icon_base64:
+        description: "Icon PNG base64 (tanpa prefix data:...)"
         required: true
+        type: string
       job_id:
+        description: "Job ID dari bot (buat nama artifact)"
         required: true
+        type: string
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: android
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
+      # ✅ FIX: decode icon yang aman (buat folder dulu + buang newline/spasi + buang prefix)
       - name: Decode Icon
+        shell: bash
         run: |
-          echo "${{ github.event.inputs.icon_base64 }}" | base64 -d > app/src/main/res/mipmap-hdpi/ic_launcher.png
+          mkdir -p app/src/main/res/mipmap-hdpi
+          ICON="${{ github.event.inputs.icon_base64 }}"
+          ICON="${ICON#data:image/png;base64,}"
+          printf '%s' "$ICON" | tr -d '\n\r ' | base64 -d > app/src/main/res/mipmap-hdpi/ic_launcher.png
+          ls -lah app/src/main/res/mipmap-hdpi/ic_launcher.png
 
+      # ✅ Replace URL placeholder di MainActivity
       - name: Replace URL
+        shell: bash
         run: |
-          sed -i "s|{{URL_PLACEHOLDER}}|${{ github.event.inputs.url }}|g" app/src/main/java/com/lixx/webapp/MainActivity.java
+          URL="${{ github.event.inputs.url }}"
+          # escape / & biar sed aman
+          URL_ESCAPED=$(printf '%s' "$URL" | sed -e 's/[\/&]/\\&/g')
+          sed -i "s/{{URL_PLACEHOLDER}}/${URL_ESCAPED}/g" app/src/main/java/com/lixx/webapp/MainActivity.java
+          grep -n "loadUrl" -n app/src/main/java/com/lixx/webapp/MainActivity.java || true
 
+      # ✅ Set nama app di strings.xml
       - name: Set App Name
+        shell: bash
         run: |
-          sed -i "s|WebApp|${{ github.event.inputs.app_name }}|g" app/src/main/res/values/strings.xml
+          APP="${{ github.event.inputs.app_name }}"
+          APP_ESCAPED=$(printf '%s' "$APP" | sed -e 's/[\/&]/\\&/g')
+          # ganti text WebApp jadi nama input (pastikan strings.xml punya <string name="app_name">WebApp</string>
+          sed -i "s/>WebApp</>${APP_ESCAPED}</g" app/src/main/res/values/strings.xml
+          cat app/src/main/res/values/strings.xml
 
-      - name: Build APK
+      - name: Build APK (Release)
+        shell: bash
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: web-apk-${{ github.event.inputs.job_id }}
-          path: android/app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/release/*.apk
