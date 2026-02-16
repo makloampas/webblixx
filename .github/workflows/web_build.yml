@@ -4,22 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: "URL web (contoh: http://152.42.253.8:2187)"
         required: true
       app_name:
-        description: "Nama App"
         required: true
       icon_base64:
-        description: "Icon PNG base64 (tanpa header data:image/png;base64,)"
         required: true
       job_id:
-        description: "Job id dari bot"
         required: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -30,54 +25,34 @@ jobs:
           java-version: "17"
 
       - name: Decode Icon (PNG base64 -> mipmap)
-        shell: bash
         run: |
-          mkdir -p app/src/main/res/mipmap-hdpi
-          mkdir -p app/src/main/res/mipmap-mdpi
-          mkdir -p app/src/main/res/mipmap-xhdpi
-          mkdir -p app/src/main/res/mipmap-xxhdpi
-          mkdir -p app/src/main/res/mipmap-xxxhdpi
-
           echo "${{ github.event.inputs.icon_base64 }}" | base64 -d > /tmp/ic_launcher.png
-
-          # copy same icon to all densities (simple & aman)
-          cp /tmp/ic_launcher.png app/src/main/res/mipmap-mdpi/ic_launcher.png
+          mkdir -p app/src/main/res/mipmap-hdpi
           cp /tmp/ic_launcher.png app/src/main/res/mipmap-hdpi/ic_launcher.png
-          cp /tmp/ic_launcher.png app/src/main/res/mipmap-xhdpi/ic_launcher.png
-          cp /tmp/ic_launcher.png app/src/main/res/mipmap-xxhdpi/ic_launcher.png
-          cp /tmp/ic_launcher.png app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
 
       - name: Replace URL in MainActivity (auto-find)
-        shell: bash
         run: |
+          set -e
           URL="${{ github.event.inputs.url }}"
-          URL_ESCAPED=$(printf '%s' "$URL" | sed -e 's/[\/&]/\\&/g')
-
-          MAIN_FILE=$(find app/src/main/java -type f -name "MainActivity.java" | head -n 1)
-          if [ -z "$MAIN_FILE" ]; then
-            echo "❌ MainActivity.java tidak ditemukan"
-            find app/src/main/java -maxdepth 6 -type f | head -n 200
+          FILE=$(find app/src/main/java -type f -name "MainActivity.java" | head -n 1)
+          if [ -z "$FILE" ]; then
+            echo "MainActivity.java not found!"
+            ls -R app/src/main/java || true
             exit 1
           fi
-
-          echo "✅ MainActivity: $MAIN_FILE"
-          sed -i "s/{{URL_PLACEHOLDER}}/${URL_ESCAPED}/g" "$MAIN_FILE"
-          grep -n "loadUrl" "$MAIN_FILE" || true
+          echo "MainActivity: $FILE"
+          sed -i "s|{{URL_PLACEHOLDER}}|$URL|g" "$FILE"
 
       - name: Set App Name
-        shell: bash
         run: |
-          APP_NAME="${{ github.event.inputs.app_name }}"
-          APP_NAME_ESCAPED=$(printf '%s' "$APP_NAME" | sed -e 's/[\/&]/\\&/g')
-          sed -i "s|<string name=\"app_name\">.*</string>|<string name=\"app_name\">${APP_NAME_ESCAPED}</string>|g" app/src/main/res/values/strings.xml
-          cat app/src/main/res/values/strings.xml
+          NAME="${{ github.event.inputs.app_name }}"
+          sed -i "s|{{APP_NAME}}|$NAME|g" app/src/main/res/values/strings.xml
 
       - name: Grant execute for gradlew
         run: chmod +x gradlew
 
       - name: Build APK Release
-        run: |
-          ./gradlew assembleRelease --no-daemon
+        run: ./gradlew assembleRelease
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
